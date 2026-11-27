@@ -113,7 +113,7 @@ test('an inspected open SSE finishes the child, returns its files and accepts a 
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => { server.closeAllConnections(); server.close() })
-  let streamSignal
+  let streamSignal, abortCollection
   const api = {
     async send(id, events) {
       assert.equal(id, 'remote')
@@ -130,6 +130,10 @@ test('an inspected open SSE finishes the child, returns its files and accepts a 
     async request(path) { assert.equal(path, 'sessions/remote'); return {} },
     async outputs() {
       assert.equal(streamSignal.aborted, true)
+      if (abortCollection) {
+        abortCollection.abort()
+        abortCollection.signal.throwIfAborted()
+      }
       return [{ id: 'file-' + posts.length, name: 'result-' + posts.length + '.csv' }]
     },
   }
@@ -148,6 +152,12 @@ test('an inspected open SSE finishes the child, returns its files and accepts a 
     assert.equal(task.sending, false)
   }
   assert.deepEqual(posts, ['compare these reports', 'group the differences by product'])
+  abortCollection = new AbortController()
+  history.push({ id: 'third', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'export totals' }] })
+  await assert.rejects(Array.fromAsync(adapter.stream({ sessionId: 'child', signal: abortCollection.signal })), { name: 'AbortError' })
+  assert.equal(task.status, 'unconfirmed')
+  assert.equal(task.sending, true)
+  assert.deepEqual(posts, ['compare these reports', 'group the differences by product', 'export totals'])
 })
 
 test('a resumed child reconciles the accepted turn even if its saved cursor is already idle', async () => {
@@ -201,6 +211,20 @@ test('a follow-up reuses the remote session and can stop after an SSE span curso
     ] }
   }
   await observe(api, task, { changed, signal })
+  assert.equal(task.status, 'cancelled')
+})
+
+test('a stop queued during recovery waits for the accepted input to become visible', async () => {
+  const task = { sessionId: 'remote', status: 'running', inputId: 'input' }
+  const committed = (seq, type, extra = {}) => ({ id: String(seq), sequence_number: seq, type, processed_at: 'now', ...extra })
+  const pages = [[], [committed(8, 'user.message', { id: 'input' })],
+    [committed(9, 'session.status_idle', { stop_reason: { type: 'interrupted' } })]]
+  let calls = 0
+  await observe({ request: async () => ({ data: pages.shift() }) }, task, {
+    changed: async () => {}, wait: async () => {}, signal,
+    beforeWait: async () => { calls++; assert.equal(task.inputSeq, 8) },
+  })
+  assert.equal(calls, 1)
   assert.equal(task.status, 'cancelled')
 })
 
