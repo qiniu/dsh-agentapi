@@ -15,10 +15,12 @@ Bring your Qiniu AgentAPI agents and their execution environments into DeepSeek 
 In DeepSeek Harness Desktop, open **Plugins → Add plugin**, paste the package URL below, and select **Install**. Restart DSH when the installation finishes.
 
 ```text
-https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
-The same field accepts the GitHub source `github:qiniu/dsh-agentapi#v0.1.0` or the absolute path to a downloaded `.tgz` file or local plugin directory. [Download the release](https://github.com/qiniu/dsh-agentapi/releases/tag/v0.1.0)
+The same field accepts the GitHub source `github:qiniu/dsh-agentapi#v0.1.1` or the absolute path to a downloaded `.tgz` file or local plugin directory. [Download the release](https://github.com/qiniu/dsh-agentapi/releases/tag/v0.1.1)
+
+If you installed v0.1.0, remove `@xgrowthlab/dsh-agentapi` from this profile before adding the new package. Your AgentAPI settings and session history carry over.
 
 <details>
 <summary>Install with the DSH CLI (Web or Desktop)</summary>
@@ -26,13 +28,13 @@ The same field accepts the GitHub source `github:qiniu/dsh-agentapi#v0.1.0` or t
 For DSH Web, install into the <code>web</code> profile, then restart the corresponding DSH service.
 
 ```sh
-dsh plugin --profile web add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+dsh plugin --profile web add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
 For Desktop, open the app once to initialize its profile, then quit it completely. Run the following command and reopen the app.
 
 ```sh
-dsh plugin --profile desktop add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+dsh plugin --profile desktop add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
 </details>

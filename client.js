@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@xgrowthlab/dsh-agentapi',
+  id: '@qiniu/dsh-agentapi',
   factory(require) {
     const React = require('react')
     const { rankByName, Menu, IconChevronDownOutlineRegular } = require('@deepseek-ai/dsh-client-ui-primitives')
