@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { runInNewContext } from 'node:vm'
 import { installCloud, remoteTools, view } from '../lib/provider.js'
 import { liveEvents, sseEvents, textChunks } from '../lib/stream.js'
@@ -21,7 +22,9 @@ test('dispatch returns a lossless JSON receipt as soon as the native child accep
     snapshot: async () => ({ config: {} }) }, { LlmAdapter: class {} })
   const receipt = await dispatch({ id: 'parent' }, { text: 'compute', title: 'test' }, signal)
   assert.equal(starts, 1)
-  assert.deepEqual(receipt, { id: receipt.id, name: 'cloud-' + receipt.id.slice(0, 8), title: '云端 · test', accepted: true })
+  const { message, ...child } = receipt
+  assert.deepEqual(child, { id: receipt.id, name: 'cloud-' + receipt.id.slice(0, 8), title: '云端 · test', accepted: true })
+  assert.ok(message)
   for (const result of [receipt, view(tasks[receipt.id])]) assert.deepEqual(JSON.parse(JSON.stringify(result)), result)
 })
 
@@ -86,6 +89,107 @@ test('a dropped SSE connection recovers current-turn events without posting anot
   assert.equal(query.searchParams.get('page'), 'this-turn')
 })
 
+test('an inspected open SSE finishes the child, returns its files and accepts a follow-up', async t => {
+  const posts = []
+  const history = []
+  const task = { id: 'child', sessionId: 'remote', nativeChild: true, allowPolicyApplied: true,
+    inputFiles: [], files: [], status: 'completed' }
+  const session = { deriveMessages: () => history }
+  let adapter
+  const ctx = { on() {}, agents: { get: () => ({ session }) }, subagents: { registerProvider() {} },
+    llm: { registerAdapter: (_, value) => { adapter = value } } }
+  const server = createServer((_, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    const turn = posts.length
+    for (const [i, event] of [
+      { type: 'user.message', id: 'input-' + turn },
+      { type: 'agent.message', content: [{ type: 'text', text: 'answer ' + turn }] },
+      { type: 'session.status_idle', stop_reason: { type: 'end_turn' } },
+    ].entries()) {
+      res.write('data: ' + JSON.stringify({ id: 'event-' + i, sequence_number: turn * 10 + i,
+        processed_at: 'now', ...event }) + '\n\n')
+    }
+    // Session SSE stays open for future turns.
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => { server.closeAllConnections(); server.close() })
+  let streamSignal, abortCollection
+  const api = {
+    async send(id, events) {
+      assert.equal(id, 'remote')
+      assert.equal(events[0].type, 'user.message')
+      posts.push(events[0].input.parts[0].text)
+      return { data: [{ id: 'input-' + posts.length }] }
+    },
+    async fetcher(_, options) {
+      streamSignal = options.signal
+      const response = await fetch('http://127.0.0.1:' + server.address().port, options)
+      void response.clone().text().catch(() => {}) // Same second reader as the DSH network inspector.
+      return response
+    },
+    async request(path) { assert.equal(path, 'sessions/remote'); return {} },
+    async outputs() {
+      assert.equal(streamSignal.aborted, true)
+      if (abortCollection) {
+        abortCollection.abort()
+        abortCollection.signal.throwIfAborted()
+      }
+      return [{ id: 'file-' + posts.length, name: 'result-' + posts.length + '.csv' }]
+    },
+  }
+  installCloud(ctx, { tasks: { child: task }, resources: {}, snapshot: async () => ({ api }), persist: async () => {} },
+    { LlmAdapter: class {} })
+  for (const text of ['compare these reports', 'group the differences by product']) {
+    history.push({ id: text, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] })
+    const deadline = AbortSignal.timeout(2500)
+    const chunks = await Array.fromAsync(adapter.stream({ sessionId: 'child', signal: deadline }))
+    assert.equal(deadline.aborted, false, 'the adapter must finish without an external abort')
+    assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+    const blocks = chunks.filter(c => c.type === 'block-end').map(c => c.block.text)
+    assert.deepEqual(blocks.slice(0, -1), ['answer ' + posts.length])
+    assert.ok(blocks.at(-1).includes(task.files[0].name))
+    assert.equal(task.status, 'completed')
+    assert.equal(task.sending, false)
+  }
+  assert.deepEqual(posts, ['compare these reports', 'group the differences by product'])
+  abortCollection = new AbortController()
+  history.push({ id: 'third', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'export totals' }] })
+  await assert.rejects(Array.fromAsync(adapter.stream({ sessionId: 'child', signal: abortCollection.signal })), { name: 'AbortError' })
+  assert.equal(task.status, 'unconfirmed')
+  assert.equal(task.sending, true)
+  assert.deepEqual(posts, ['compare these reports', 'group the differences by product', 'export totals'])
+})
+
+test('a resumed child reconciles the accepted turn even if its saved cursor is already idle', async () => {
+  let adapter
+  const task = { id: 'child', sessionId: 'remote', nativeChild: true, status: 'unconfirmed', sending: true,
+    inputId: 'original', inputSeq: 1, cursor: 'idle', lastMessage: 'original', files: [], inputFiles: [] }
+  const session = { deriveMessages: () => [{ id: 'original', role: 'user', source: { kind: 'user' } }] }
+  const local = { session, cancel: () => assert.fail('the cloud turn already finished') }
+  const ctx = { on() {}, agents: { get: () => local }, subagents: { registerProvider() {} },
+    llm: { registerAdapter: (_, value) => { adapter = value } } }
+  const api = {
+    async request(path) {
+      assert.equal(new URL(path, 'https://unit.test').searchParams.get('page'), 'original')
+      local.cancel({ kind: 'user' }) // A stop during replay must never interrupt a newer Portal turn.
+      return { data: [
+        { type: 'agent.message', id: 'result', sequence_number: 2, processed_at: 'now', content: [{ type: 'text', text: 'done' }] },
+        { type: 'session.status_idle', id: 'idle', sequence_number: 3, processed_at: 'now', stop_reason: { type: 'end_turn' } },
+        { type: 'session.status_running', id: 'later', sequence_number: 4, processed_at: 'now' },
+      ] }
+    },
+    async outputs() { return [{ id: 'report', name: 'report.md' }] },
+  }
+  installCloud(ctx, { tasks: { child: task }, resources: {}, snapshot: async () => ({ api }), persist: async () => {} },
+    { LlmAdapter: class {} })
+  const chunks = await Array.fromAsync(adapter.stream({ sessionId: 'child', signal: AbortSignal.timeout(2500) }))
+  assert.match(chunks.find(c => c.type === 'block-end').block.text, /done[\s\S]*report\.md/)
+  assert.equal(chunks.at(-1).reason.kind, 'stop')
+  assert.equal(task.status, 'completed')
+  assert.equal(task.cursor, 'idle')
+  assert.equal(task.sending, false)
+})
+
 test('a follow-up reuses the remote session and can stop after an SSE span cursor', async () => {
   const task = { sessionId: 'ses_test', inputFiles: [], status: 'preparing' }
   const changed = async () => {}
@@ -107,6 +211,20 @@ test('a follow-up reuses the remote session and can stop after an SSE span curso
     ] }
   }
   await observe(api, task, { changed, signal })
+  assert.equal(task.status, 'cancelled')
+})
+
+test('a stop queued during recovery waits for the accepted input to become visible', async () => {
+  const task = { sessionId: 'remote', status: 'running', inputId: 'input' }
+  const committed = (seq, type, extra = {}) => ({ id: String(seq), sequence_number: seq, type, processed_at: 'now', ...extra })
+  const pages = [[], [committed(8, 'user.message', { id: 'input' })],
+    [committed(9, 'session.status_idle', { stop_reason: { type: 'interrupted' } })]]
+  let calls = 0
+  await observe({ request: async () => ({ data: pages.shift() }) }, task, {
+    changed: async () => {}, wait: async () => {}, signal,
+    beforeWait: async () => { calls++; assert.equal(task.inputSeq, 8) },
+  })
+  assert.equal(calls, 1)
   assert.equal(task.status, 'cancelled')
 })
 
