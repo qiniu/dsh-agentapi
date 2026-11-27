@@ -15,10 +15,14 @@
 在 DeepSeek Harness 桌面版打开 **插件 → 添加插件**，粘贴以下安装包地址，点击 **安装**，完成后重启 DSH。
 
 ```text
-https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
-同一输入框也支持 GitHub 地址 `github:qiniu/dsh-agentapi#v0.1.0`、已下载的 `.tgz` 文件或本地插件目录的绝对路径。[下载发行版](https://github.com/qiniu/dsh-agentapi/releases/tag/v0.1.0)
+同一输入框也支持 GitHub 地址 `github:qiniu/dsh-agentapi#v0.1.1`、已下载的 `.tgz` 文件或本地插件目录的绝对路径。[下载发行版](https://github.com/qiniu/dsh-agentapi/releases/tag/v0.1.1)
+
+从 v0.1.0 升级时，请先在当前配置中移除旧插件 `@xgrowthlab/dsh-agentapi`，再添加新版。已有的 AgentAPI 设置和会话记录会保留。
+
+**npm 安装。** 包名为 `@qiniu/dsh-agentapi`。[首次发布进度](https://github.com/qiniu/dsh-agentapi/issues/1)可在 GitHub 查看。上架后，在 **添加插件** 中输入包名，或运行 `dsh plugin --profile web add @qiniu/dsh-agentapi`。
 
 <details>
 <summary>使用 DSH CLI 安装（Web 或桌面版）</summary>
@@ -26,13 +30,13 @@ https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.
 Web 版使用 `web` profile，安装后重启对应的 DSH 服务。
 
 ```sh
-dsh plugin --profile web add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+dsh plugin --profile web add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
 桌面版使用 `desktop` profile。先启动一次桌面应用并完全退出，执行以下命令，再重新打开应用。
 
 ```sh
-dsh plugin --profile desktop add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.0/dsh-agentapi-0.1.0.tgz
+dsh plugin --profile desktop add https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.1.tgz
 ```
 
 </details>

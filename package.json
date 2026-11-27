@@ -1,8 +1,10 @@
 {
-  "name": "@xgrowthlab/dsh-agentapi",
-  "version": "0.1.0",
+  "name": "@qiniu/dsh-agentapi",
+  "version": "0.1.1",
+  "license": "MIT",
+  "publishConfig": { "access": "public" },
   "description": "Qiniu AgentAPI integration for DeepSeek Harness.",
-  "repository": { "type": "git", "url": "https://github.com/qiniu/dsh-agentapi.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/qiniu/dsh-agentapi.git" },
   "type": "module",
   "main": "./index.js",
   "exports": { ".": "./index.js", "./client": "./client.js", "./package.json": "./package.json" },
