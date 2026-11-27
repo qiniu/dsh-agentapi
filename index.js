@@ -2,7 +2,6 @@ import { AgentAPI, credential, defaults, endpoint, models, portal, runtimes } fr
 import { hostModule, installCloud, view } from './lib/provider.js'
 import { repositoryCredentials, selectedAttachments } from './lib/inputs.js'
 import { pausedForParent } from './lib/turn-control.js'
-import { installCloudRoute } from './lib/cloud-route.js'
 import { terminal, statusText } from './lib/run.js'
 import { readUsage } from './lib/usage.js'
 import { delegateParameters, statusParameters, cancelParameters, pageParameters } from './lib/tool-parameters.js'
@@ -46,7 +45,6 @@ export async function apply(ctx) {
     return { api: new AgentAPI(key), config: { ...state.settings } }
   }
   const dispatch = installCloud(ctx, { tasks: state.tasks, resources: state.resources, snapshot, persist })
-  const delegate = installCloudRoute(ctx, state.tasks, dispatch)
 
   function owned(owner, id) {
     const task = Object.hasOwn(state.tasks, id) && state.tasks[id]
@@ -65,7 +63,7 @@ export async function apply(ctx) {
   }
 
   register('agentapi_delegate',
-    'Assign work to a new cloud agent Session. Write the goal, context and expected deliverable in task. Acceptance returns the DSH child id and name. The child executes the assignment and reports back automatically. Use send_message for follow-ups.',
+    'Delegate work asynchronously to a new cloud agent Session. Include the goal, relevant context and expected deliverable in task. On acceptance, acknowledge the handoff to the user. The child reports its result to this conversation. Use send_message with its returned name for follow-ups.',
     delegateParameters, async ({ task, title, commit, attachments: names, ...sessionOptions }, exec) => {
       if (!task.trim()) throw new Error('task must contain the first message for the cloud agent.')
       const { agent, environment_id, metadata } = sessionOptions
@@ -82,7 +80,7 @@ export async function apply(ctx) {
       }
       const attachments = selectedAttachments(exec.agent.session.deriveMessages(), names)
       if (sessionOptions.resources) sessionOptions.resources = await repositoryCredentials(sessionOptions.resources, ctx.credentials)
-      return delegate(exec, { text: task, title, commit, attachments, sessionOptions })
+      return dispatch(exec.agent, { text: task, title, commit, attachments, sessionOptions }, exec.signal)
     })
 
   for (const [kind, description] of [
@@ -114,7 +112,8 @@ export async function apply(ctx) {
   ctx.systemPrompt.section({ name: 'agentapi-cloud', order: 620, text: [
     'When the user starts a request with /cloud or asks for cloud execution, act as the dispatcher. Resolve references from the conversation, capture the user’s constraints and success criteria, and assign the execution to the cloud child. Leave investigation, implementation and verification to that child. Ask a focused question if essential input is missing.',
     'Use agentapi_delegate for new work. Omit agent and environment_id to use configured defaults. Use the catalog tools when the user asks what is available or a named resource needs an ID.',
-    'For a follow-up, send_message to the existing cloud child by name. Native list_agents recovers DSH names. The child retains its remote conversation and files. After delivery, finish this turn. The completion notice wakes you to summarize the result, deliverables and any gaps.',
+    'For a follow-up, use send_message with the existing cloud child’s name. Use list_agents to recover its name. The child retains its Session context and files.',
+    'After a successful handoff or follow-up, tell the user what you handed off and that the child will report back here. Continue any independent work the user requested. Leave the delegated work with the child and rely on its completion notice for the result. If delivery fails, tell the user what happened.',
     'When the user stops a child, acknowledge that assignment’s cancellation in the user’s language. Resume or replace that assignment only if the user asks. Continue independent work normally.',
     'Name selected attachments in the assignment. Ask the child to write downloadable deliverables under /mnt/session/outputs/. Report completion from the child’s result and check it against the user’s criteria.',
   ].join('\n') })

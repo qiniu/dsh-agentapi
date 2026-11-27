@@ -1,51 +1,54 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { installCloudRoute } from '../lib/cloud-route.js'
+import { apply } from '../index.js'
 
-test('explicit cloud handoff guards the active request and concludes only an accepted dispatch', async () => {
-  const hooks = {}
-  let guard, ended = 0
-  const ctx = { on: (name, cb) => { hooks[name] = cb }, tools: { guard: cb => { guard = cb } } }
-  const parent = { id: 'parent', session: {} }, other = { id: 'other', session: {} }
-  const child = { id: '12345678-child', nativeChild: true, owner: parent.id, session: { header: { origin: 'subagent' } } }
-  const delegate = installCloudRoute(ctx, { [child.id]: child }, async (_, reply) => {
-    if (reply instanceof Error) throw reply
-    return reply
+test('/cloud hands control back to the parent after a dispatch or follow-up', async t => {
+  // The plugin normally resolves these two SDK modules from the Desktop installation.
+  const root = await mkdtemp(join(tmpdir(), 'dsh-host-'))
+  const installed = process.env.DSH_INSTALL_DIR
+  t.after(async () => {
+    if (installed === undefined) delete process.env.DSH_INSTALL_DIR
+    else process.env.DSH_INSTALL_DIR = installed
+    await rm(root, { recursive: true, force: true })
   })
-  const claim = (text, agent = parent, kind = 'user') => hooks['agent/inbox/claimed']({ agent,
-    message: { source: { kind }, content: [{ type: 'text', text }] } })
-  const check = (name, args = {}, agent = parent) => guard({ name, arguments: args, agent })
-  const exec = { agent: parent, concludeTurn: () => { ended++ } }
-  claim(' /cloud 核对这两套口径，返回差异和证据')
-  for (const name of ['read', 'grep', 'glob', 'create_goal', 'subagent']) assert.match(check(name), /agentapi_delegate/)
-  assert.match(check('bash', { command: 'git rev-parse HEAD && node audit.js' }), /agentapi_delegate/)
-  assert.equal(check('bash', { command: 'git rev-parse HEAD' }), undefined)
-  for (const name of ['agentapi_delegate', 'agentapi_list_agents', 'agentapi_list_environments', 'ask_user_question']) {
-    assert.equal(check(name), undefined)
+  for (const [name, source] of [
+    ['dsh-llm', 'exports.LlmAdapter = class {}'],
+    ['dsh-tools', 'exports.validateJsonSchemaValue = () => []'],
+  ]) {
+    const dir = join(root, 'node_modules', '@deepseek-ai', name)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'index.js'), source)
   }
-  assert.equal(check('send_message', { agent: 'cloud-12345678' }), undefined)
-  assert.match(check('send_message', { agent: 'local-child' }), /cloud/)
-  claim('/cloud process this literal', child)
-  assert.equal(check('read', {}, child), undefined)
-  assert.equal(check('read', {}, other), undefined)
-  await assert.rejects(delegate(exec, Error('activation failed')), /activation failed/)
-  await delegate(exec, { accepted: false })
-  assert.equal(ended, 0)
-  await delegate(exec, { accepted: true })
-  assert.equal(ended, 1)
-  const followUp = { ...exec, name: 'send_message', arguments: { agent: 'cloud-12345678' } }
-  assert.equal(hooks['tools/execute'](followUp, () => 'delivered'), 'delivered')
-  assert.equal(ended, 2)
-  hooks['session/event'](parent.session, { type: 'turn/end' })
-  claim('/cloud quoted by the child', parent, 'subagent-settled')
-  assert.equal(check('read'), undefined)
-  await delegate(exec, { accepted: true })
-  assert.equal(ended, 2)
-  claim('/cloud first')
-  claim('在主会话处理这个新问题')
-  assert.equal(check('read'), undefined)
-  for (const text of ['/cloudy', 'explain /cloud', '`/cloud task`']) {
-    claim(text)
-    assert.equal(check('read'), undefined)
+  process.env.DSH_INSTALL_DIR = root
+
+  const hooks = new Map(), tools = new Map(), guards = []
+  const unit = { loadAll: async () => ({}), setGlobal: async () => {} }
+  const agent = { id: 'parent', session: { deriveMessages: () => [] } }
+  let activation
+  await apply({
+    storage: { backend: { get: () => ({ kv: { open: async () => unit } }) } },
+    credentials: { readRecord: async () => ({ key: 'test' }) },
+    agents: { get: () => agent }, effect() {}, llm: { registerAdapter() {} },
+    on(name, fn) { hooks.set(name, [...(hooks.get(name) || []), fn]) },
+    subagents: { registerProvider() {}, startActivation: async spec => { activation = spec } },
+    tools: { register: def => tools.set(def.name, def), guard: fn => guards.push(fn) },
+    systemPrompt: { section() {}, context() {} }, connection: { fetch: { register() {} } },
+  })
+  for (const claim of hooks.get('agent/inbox/claimed') || []) {
+    claim({ agent, message: { source: { kind: 'user' }, content: [{ type: 'text', text: '/cloud compare reports' }] } })
+  }
+  const exec = { agent, signal: new AbortController().signal, concludeTurn: () => assert.fail('parent turn was forced closed') }
+  const receipt = await tools.get('agentapi_delegate').execute({ task: 'Compare the two reports' }, exec)
+  assert.equal(activation.delivery, 'parent')
+  assert.equal(receipt.accepted, true)
+  assert.match(receipt.message, /[Tt]ell the user/)
+  for (const [name, args] of [['send_message', { agent: receipt.name }], ['read', {}]]) {
+    const call = { ...exec, name, arguments: args }
+    for (const guard of guards) assert.equal(guard(call), undefined)
+    const run = hooks.get('tools/execute').reduceRight((next, handler) => () => handler(call, next), () => 'delivered')
+    assert.equal(await run(), 'delivered')
   }
 })
