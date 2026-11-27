@@ -22,6 +22,8 @@ https://github.com/qiniu/dsh-agentapi/releases/download/v0.1.1/dsh-agentapi-0.1.
 
 从 v0.1.0 升级时，请先在当前配置中移除旧插件 `@xgrowthlab/dsh-agentapi`，再添加新版。已有的 AgentAPI 设置和会话记录会保留。
 
+**npm 安装。** 包名为 `@qiniu/dsh-agentapi`。[首次发布进度](https://github.com/qiniu/dsh-agentapi/issues/1)可在 GitHub 查看。上架后，在 **添加插件** 中输入包名，或运行 `dsh plugin --profile web add @qiniu/dsh-agentapi`。
+
 <details>
 <summary>使用 DSH CLI 安装（Web 或桌面版）</summary>
 

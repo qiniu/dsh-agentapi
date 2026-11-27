@@ -22,6 +22,8 @@ The same field accepts the GitHub source `github:qiniu/dsh-agentapi#v0.1.1` or t
 
 If you installed v0.1.0, remove `@xgrowthlab/dsh-agentapi` from this profile before adding the new package. Your AgentAPI settings and session history carry over.
 
+**npm distribution.** The registry package name is `@qiniu/dsh-agentapi`. Once the [first npm release](https://github.com/qiniu/dsh-agentapi/issues/1) is available, enter the package name in **Add plugin** or run `dsh plugin --profile web add @qiniu/dsh-agentapi`.
+
 <details>
 <summary>Install with the DSH CLI (Web or Desktop)</summary>
 
